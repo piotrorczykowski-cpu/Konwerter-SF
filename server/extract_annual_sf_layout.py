@@ -15,7 +15,11 @@ SRC=args.source
 OUT=args.output
 r=etree.parse(SRC).getroot()
 L=lambda e: etree.QName(e).localname
-def top(n): return next(e for e in r if L(e)==n)
+def top(n):
+    # Schematy BES spotykane w praktyce występują w dwóch odmianach:
+    # sekcje są bezpośrednio pod korzeniem albo pod FunduszInwestycyjny.
+    # Wyszukiwanie rekurencyjne obsługuje oba warianty.
+    return next(e for e in r.iter() if L(e)==n)
 def c(e,n): return next((x for x in e if L(x)==n),None)
 def desc(e,n): return next((x for x in e.iter() if L(x)==n),None)
 def num(e, key):
@@ -35,15 +39,20 @@ period_to=first_text('OkresDo')
 current_year=(period_to or period_from or '2024')[:4]
 try: comparative_year=str(int(current_year)-1)
 except ValueError: comparative_year='2023'
-meta={'fund_name':first_text('NazwaFunduszu',first_text('Nazwa', 'Fundusz inwestycyjny')),
+meta={'fund_name':first_text('NazwaFunduszu',first_text('P_1A',first_text('Nazwa', 'Fundusz inwestycyjny'))),
       'period_from':period_from,'period_to':period_to,
       'current_year':current_year,'comparative_year':comparative_year}
+CY=current_year
+PY=comparative_year
+
+def period_row(label, level, current, comparative, **extra):
+    return {'Pozycja':label,'Poziom':level,CY:current,PY:comparative,**extra}
 
 def two_rows(section, mappings):
     out=[]
     for code,label,indent in mappings:
         a,b=pair(section,code)
-        out.append({'Pozycja':label,'Poziom':indent,'2024':a,'2023':b})
+        out.append(period_row(label,indent,a,b))
     return out
 
 balance=two_rows('Bilans',[
@@ -53,8 +62,8 @@ balance=two_rows('Bilans',[
 bilans=top('Bilans')
 ci=desc(bilans,'VIII'); navci=desc(bilans,'IX')
 balance_extra=[
- {'Pozycja':'Liczba zarejestrowanych certyfikatów inwestycyjnych','Poziom':0,'2024':num(ci,'LiczbaA'),'2023':num(ci,'LiczbaB'),'Format':'count'},
- {'Pozycja':'Wartość aktywów netto na certyfikat inwestycyjny','Poziom':0,'2024':num(navci,'WartoscA'),'2023':num(navci,'WartoscB'),'Format':'perci'},
+ period_row('Liczba zarejestrowanych certyfikatów inwestycyjnych',0,num(ci,'LiczbaA'),num(ci,'LiczbaB'),Format='count'),
+ period_row('Wartość aktywów netto na certyfikat inwestycyjny',0,num(navci,'WartoscA'),num(navci,'WartoscB'),Format='perci'),
 ]
 
 income=two_rows('RachunekWynikuZOperacji',[
@@ -64,39 +73,37 @@ income=two_rows('RachunekWynikuZOperacji',[
 ])
 rwo=top('RachunekWynikuZOperacji')
 perci=desc(rwo,'VIII_2')
-income_extra=[{'Pozycja':'Wynik z operacji za okres przypadający na certyfikat inwestycyjny','Poziom':0,'2024':num(perci,'WartoscA'),'2023':num(perci,'WartoscB'),'Format':'perci'}]
+income_extra=[period_row('Wynik z operacji za okres przypadający na certyfikat inwestycyjny',0,num(perci,'WartoscA'),num(perci,'WartoscB'),Format='perci')]
 
 changes=two_rows('AktywaZmiany',[
 ('I','I. Zmiana wartości aktywów netto',0),('I_1','1. Wartość aktywów netto na koniec poprzedniego okresu sprawozdawczego',1),('I_2','2. Wynik z operacji za okres sprawozdawczy (razem), w tym:',1),('I_2_A','a) przychody z lokat netto',2),('I_2_B','b) zrealizowany zysk (strata) ze zbycia lokat',2),('I_2_C','c) wzrost (spadek) niezrealizowanego zysku (straty) z wyceny lokat',2),('I_3','3. Zmiana w aktywach netto z tytułu wyniku z operacji',1),('I_4','4. Dystrybucja dochodów (przychodów) funduszu (razem)',1),('I_4_A','a) przychody z lokat netto',2),('I_4_B','b) ze zrealizowanego zysku ze zbycia lokat',2),('I_4_C','c) z przychodów ze zbycia lokat',2),('I_5','5. Zmiany w kapitale w okresie sprawozdawczym (razem), w tym:',1),('I_5_A','a) zmiana kapitału wpłaconego',2),('I_5_B','b) zmiana kapitału wypłaconego',2),('I_6','6. Łączna zmiana aktywów netto w okresie sprawozdawczym',1),('I_7','7. Wartość aktywów netto na koniec okresu sprawozdawczego',1),('I_8','8. Średnia wartość aktywów netto w okresie sprawozdawczym',1)
 ])
+ci_changes=top('AktywaZmiany')
+def value_pair_in(section, tag):
+    node=desc(section,tag)
+    if node is not None and c(node,'WartoscA') is None:
+        nested=desc(node,'Wartosci')
+        if nested is not None: node=nested
+    return num(node,'WartoscA'),num(node,'WartoscB')
 changes += [
- {'Pozycja':'II. Zmiana liczby certyfikatów inwestycyjnych','Poziom':0,'2024':None,'2023':None},
- {'Pozycja':'1. Liczba wydanych certyfikatów inwestycyjnych','Poziom':1,'2024':0,'2023':0,'Format':'count'},
- {'Pozycja':'2. Liczba wykupionych certyfikatów inwestycyjnych','Poziom':1,'2024':0,'2023':0,'Format':'count'},
- {'Pozycja':'3. Saldo zmian','Poziom':1,'2024':0,'2023':0,'Format':'count'},
- {'Pozycja':'4. Liczba wydanych certyfikatów narastająco od początku działalności funduszu','Poziom':1,'2024':47000,'2023':47000,'Format':'count'},
- {'Pozycja':'5. Liczba wykupionych certyfikatów narastająco od początku działalności funduszu','Poziom':1,'2024':38000,'2023':38000,'Format':'count'},
- {'Pozycja':'6. Saldo certyfikatów','Poziom':1,'2024':9000,'2023':9000,'Format':'count'},
- {'Pozycja':'7. Przewidywana liczba certyfikatów inwestycyjnych','Poziom':1,'2024':9000,'2023':9000,'Format':'count'}]
+ period_row('II. Zmiana liczby certyfikatów inwestycyjnych',0,None,None),
+ period_row('1. Liczba wydanych certyfikatów inwestycyjnych',1,*value_pair_in(ci_changes,'II_1'),Format='count'),
+ period_row('2. Liczba wykupionych certyfikatów inwestycyjnych',1,*value_pair_in(ci_changes,'II_2'),Format='count'),
+ period_row('3. Saldo zmian',1,*value_pair_in(ci_changes,'II_3'),Format='count'),
+ period_row('4. Liczba wydanych certyfikatów narastająco od początku działalności funduszu',1,*value_pair_in(ci_changes,'II_1_A'),Format='count'),
+ period_row('5. Liczba wykupionych certyfikatów narastająco od początku działalności funduszu',1,*value_pair_in(ci_changes,'II_2_A'),Format='count'),
+ period_row('6. Saldo certyfikatów',1,*value_pair_in(ci_changes,'II_2_C'),Format='count'),
+ period_row('7. Przewidywana liczba certyfikatów inwestycyjnych',1,*value_pair_in(ci_changes,'II_3'),Format='count')]
 az=top('AktywaZmiany')
 def w(tag):
     e=desc(az,tag); return num(e,'WartoscA'),num(e,'WartoscB')
 nav_changes=[
- {'Pozycja':'III. Zmiana WAN na certyfikat inwestycyjny','Poziom':0,'2024':None,'2023':None},
- {'Pozycja':'1. WAN na certyfikat na koniec poprzedniego okresu','Poziom':1,'2024':62556.47,'2023':58438.68,'Format':'perci'},
- {'Pozycja':'2. WAN na certyfikat na koniec bieżącego okresu','Poziom':1,'2024':69270.06,'2023':62556.47,'Format':'perci'},
- {'Pozycja':'3. Procentowa zmiana WAN na certyfikat w okresie','Poziom':1,'2024':10.73,'2023':7.05,'Format':'percent'},
- {'Pozycja':'4. Minimalna WAN na certyfikat','Poziom':1,'2024':63248.56,'2023':58471.88,'Format':'perci'},
- {'Pozycja':'5. Maksymalna WAN na certyfikat','Poziom':1,'2024':68081.15,'2023':62269.42,'Format':'perci'},
- {'Pozycja':'6. WAN wg ostatniej wyceny w okresie','Poziom':1,'2024':69270.06,'2023':62556.47,'Format':'perci'},
- {'Pozycja':'7. Rozwodniona WAN na certyfikat','Poziom':1,'2024':69270.06,'2023':62556.47,'Format':'perci'},
- {'Pozycja':'IV. Procentowy udział kosztów funduszu w średniej WAN','Poziom':0,'2024':0.16,'2023':0.18,'Format':'percent'},
- {'Pozycja':'1. procentowy udział wynagrodzenia dla towarzystwa','Poziom':1,'2024':0.09,'2023':0.11,'Format':'percent'},
- {'Pozycja':'2. procentowy udział wynagrodzenia dla podmiotów prowadzących dystrybucję','Poziom':1,'2024':0,'2023':0,'Format':'percent'},
- {'Pozycja':'3. procentowy udział opłat dla depozytariusza','Poziom':1,'2024':0.01,'2023':0.01,'Format':'percent'},
- {'Pozycja':'4. procentowy udział opłat związanych z prowadzeniem rejestru aktywów funduszu','Poziom':1,'2024':0.02,'2023':0.02,'Format':'percent'},
- {'Pozycja':'5. procentowy udział opłat za usługi w zakresie rachunkowości','Poziom':1,'2024':0.02,'2023':0.02,'Format':'percent'},
- {'Pozycja':'6. procentowy udział opłat za usługi w zakresie zarządzania aktywami funduszu','Poziom':1,'2024':0,'2023':0,'Format':'percent'}]
+ period_row('III. Zmiana WAN na certyfikat inwestycyjny',0,None,None),
+ *[period_row(label,1,*value_pair_in(az,tag),Format=fmt) for tag,label,fmt in [
+  ('III_1','1. WAN na certyfikat na koniec poprzedniego okresu','perci'),('III_2','2. WAN na certyfikat na koniec bieżącego okresu','perci'),('III_3','3. Procentowa zmiana WAN na certyfikat w okresie','percent'),('III_4','4. Minimalna WAN na certyfikat','perci'),('III_5','5. Maksymalna WAN na certyfikat','perci'),('III_6','6. WAN wg ostatniej wyceny w okresie','perci'),('III_7','7. Rozwodniona WAN na certyfikat','perci')]],
+ period_row('IV. Procentowy udział kosztów funduszu w średniej WAN',0,*value_pair_in(az,'IV'),Format='percent'),
+ *[period_row(label,1,*value_pair_in(az,tag),Format='percent') for tag,label in [
+  ('IV_1','1. procentowy udział wynagrodzenia dla towarzystwa'),('IV_2','2. procentowy udział wynagrodzenia dla podmiotów prowadzących dystrybucję'),('IV_3','3. procentowy udział opłat dla depozytariusza'),('IV_4','4. procentowy udział opłat związanych z prowadzeniem rejestru aktywów funduszu'),('IV_5','5. procentowy udział opłat za usługi w zakresie rachunkowości'),('IV_6','6. procentowy udział opłat za usługi w zakresie zarządzania aktywami funduszu')]]]
 
 cashflows=two_rows('Przeplywy',[
 ('A','A. Przepływy środków pieniężnych z działalności operacyjnej',0),('A_I','I. Wpływy',1),('A_I_1','1. Z tytułu posiadanych lokat',2),('A_I_2','2. Z tytułu zbycia składników lokat',2),('A_I_3','3. Pozostałe',2),('A_II','II. Wydatki',1),('A_II_1','1. Z tytułu posiadanych lokat',2),('A_II_2','2. Z tytułu nabycia składników lokat',2),('A_II_3','3. Z tytułu wypłaconego wynagrodzenia dla towarzystwa',2),('A_II_4','4. Z tytułu wypłaconego wynagrodzenia dla podmiotów prowadzących dystrybucję',2),('A_II_5','5. Z tytułu opłat dla depozytariusza',2),('A_II_6','6. Z tytułu opłat związanych z prowadzeniem rejestru aktywów funduszu',2),('A_II_7','7. Z tytułu opłat za zezwolenia oraz opłat rejestracyjnych',2),('A_II_8','8. Z tytułu usług w zakresie rachunkowości',2),('A_II_9','9. Z tytułu usług w zakresie zarządzania aktywami funduszu',2),('A_II_10','10. Z tytułu usług prawnych',2),('A_II_11','11. Z tytułu posiadania nieruchomości',2),('A_II_12','12. Pozostałe',2),
@@ -112,8 +119,8 @@ for idx,e in enumerate(main):
     if pos is None:
         pos=desc(e,'Pozycja')
     rb=c(pos,'RB'); rp=c(pos,'RP')
-    main_rows.append({'Pozycja':f'{idx+1}. {main_labels[idx]}','2024 cena nabycia':num(rb,'KwotaA'),'2024 wycena':num(rb,'KwotaB'),'2024 udział':num(rb,'Udzial'),'2023 cena nabycia':num(rp,'KwotaA'),'2023 wycena':num(rp,'KwotaB'),'2023 udział':num(rp,'Udzial')})
-main_rows.append({'Pozycja':'Suma','2024 cena nabycia':sum(x['2024 cena nabycia'] for x in main_rows),'2024 wycena':sum(x['2024 wycena'] for x in main_rows),'2024 udział':sum(x['2024 udział'] for x in main_rows),'2023 cena nabycia':sum(x['2023 cena nabycia'] for x in main_rows),'2023 wycena':sum(x['2023 wycena'] for x in main_rows),'2023 udział':sum(x['2023 udział'] for x in main_rows)})
+    main_rows.append({'Pozycja':f'{idx+1}. {main_labels[idx]}',f'{CY} cena nabycia':num(rb,'KwotaA'),f'{CY} wycena':num(rb,'KwotaB'),f'{CY} udział':num(rb,'Udzial'),f'{PY} cena nabycia':num(rp,'KwotaA'),f'{PY} wycena':num(rp,'KwotaB'),f'{PY} udział':num(rp,'Udzial')})
+main_rows.append({'Pozycja':'Suma',f'{CY} cena nabycia':sum(x[f'{CY} cena nabycia'] for x in main_rows),f'{CY} wycena':sum(x[f'{CY} wycena'] for x in main_rows),f'{CY} udział':sum(x[f'{CY} udział'] for x in main_rows),f'{PY} cena nabycia':sum(x[f'{PY} cena nabycia'] for x in main_rows),f'{PY} wycena':sum(x[f'{PY} wycena'] for x in main_rows),f'{PY} udział':sum(x[f'{PY} udział'] for x in main_rows)})
 
 # Details of named holdings: direct descendants and value nodes retained in a readable list.
 def direct_text(e,n):
