@@ -1,5 +1,7 @@
 import json
 import sys
+import re
+import unicodedata
 from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
@@ -48,7 +50,11 @@ def table(ws, start, headers, rows, keys, widths):
     end=start+len(rows)
     if rows:
         ref=f'A{start}:{get_column_letter(len(headers))}{end}'
-        tab=Table(displayName=f'T{ws.title.replace(" ","")[:12]}{start}',ref=ref)
+        # Excel accepts only letters, numbers and underscores in table names.
+        # In particular, a hyphen in "Noty - treść" produced a repair prompt.
+        base=unicodedata.normalize('NFKD',ws.title).encode('ascii','ignore').decode('ascii')
+        base=re.sub(r'[^A-Za-z0-9_]', '', base) or 'Tabela'
+        tab=Table(displayName=f'T{base[:16]}{start}',ref=ref)
         tab.tableStyleInfo=TableStyleInfo(name='TableStyleMedium2',showRowStripes=False,showColumnStripes=False)
         ws.add_table(tab)
     set_widths(ws,widths)
